@@ -14,7 +14,6 @@ export default function Scan() {
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   
-  // Use a ref to prevent strict-mode double firing or dependency loops
   const hasLogged = useRef(false)
 
   useEffect(() => {
@@ -43,6 +42,23 @@ export default function Scan() {
       if (savedMemberId) {
         if (!hasLogged.current) {
           hasLogged.current = true
+          
+          // Prevent spam: Check if they already checked in within the last 5 minutes
+          const fiveMinsAgo = new Date(Date.now() - 5 * 60000).toISOString()
+          const { data: recent } = await supabase
+            .from('attendance')
+            .select('id')
+            .eq('member_id', savedMemberId)
+            .eq('gym_id', data.id)
+            .gte('scanned_at', fiveMinsAgo)
+            
+          if (recent && recent.length > 0) {
+            // Already checked in! Skip duplicate insert.
+            setStatus('checked_in')
+            setLoading(false)
+            return
+          }
+
           await logAttendance(savedMemberId, data.id)
         }
       } else {
@@ -52,7 +68,7 @@ export default function Scan() {
     }
     
     verifyToken()
-  }, [token]) // Removed memberId from dependencies
+  }, [token])
 
   const logAttendance = async (mId, gId) => {
     setLoading(true)
@@ -88,7 +104,6 @@ export default function Scan() {
     localStorage.setItem('gymtrack_member_id', newMemberId)
     localStorage.setItem('gymtrack_member_name', name)
     
-    // Log attendance exactly once
     if (!hasLogged.current) {
       hasLogged.current = true
       await logAttendance(newMemberId, gym.id)
