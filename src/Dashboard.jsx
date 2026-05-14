@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { supabase } from './supabaseClient'
 import { useNavigate } from 'react-router-dom'
-import { LogOut, Download, Users, Activity, Calendar, AlertTriangle, Trash2 } from 'lucide-react'
+import { LogOut, Download, Users, Activity, Calendar, AlertTriangle, Trash2, FileText } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 
 export default function Dashboard() {
   const [user, setUser] = useState(null)
@@ -49,14 +50,16 @@ export default function Dashboard() {
     const { data: memData } = await supabase.from('memberships').select('*').eq('gym_id', gymId)
     if (memData) setMemberships(memData)
     
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
+    // Fetch last 30 days for analytics
+    const thirtyDaysAgo = new Date()
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+    thirtyDaysAgo.setHours(0, 0, 0, 0)
     
     const { data: aData } = await supabase
       .from('attendance')
       .select('*, members(name)')
       .eq('gym_id', gymId)
-      .gte('scanned_at', today.toISOString())
+      .gte('scanned_at', thirtyDaysAgo.toISOString())
       .order('scanned_at', { ascending: false })
       
     if (aData) setAttendance(aData)
@@ -64,9 +67,7 @@ export default function Dashboard() {
 
   const handleDeleteCheckin = async (id) => {
     if (!window.confirm("Are you sure you want to delete this check-in?")) return;
-    
     setAttendance(prev => prev.filter(a => a.id !== id));
-    
     const { error } = await supabase.from('attendance').delete().eq('id', id);
     if (error) {
       alert("Failed to delete: " + error.message);
@@ -76,17 +77,13 @@ export default function Dashboard() {
 
   const handleDeleteMember = async (id, name) => {
     if (!window.confirm(`Are you sure you want to permanently delete ${name}? This will also delete all of their check-in history.`)) return;
-
-    // Optimistic UI updates
     setMembers(prev => prev.filter(m => m.id !== id));
     setAttendance(prev => prev.filter(a => a.member_id !== id));
     setMemberships(prev => prev.filter(m => m.member_id !== id));
-
-    // Delete from DB (foreign keys ON DELETE CASCADE will handle attendance and memberships in the database automatically)
     const { error } = await supabase.from('members').delete().eq('id', id);
     if (error) {
       alert("Failed to delete member: " + error.message);
-      await fetchDashboardStats(gym.id); // Revert if failed
+      await fetchDashboardStats(gym.id);
     }
   }
 
@@ -124,6 +121,24 @@ export default function Dashboard() {
       link.click()
     }
     img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgData)
+  }
+
+  const handleExportCSV = () => {
+    if (members.length === 0) return alert("No members to export");
+    const headers = ["Name", "Phone", "Status", "Joined Date"];
+    const rows = members.map(m => {
+      const status = getMembershipStatus(m.id).text;
+      return `"${m.name}","${m.phone}","${status}","${new Date(m.created_at).toLocaleDateString()}"`;
+    });
+    const csvContent = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", "gym_members.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   }
 
   const saveMembership = async (e) => {
@@ -174,6 +189,23 @@ export default function Dashboard() {
     return member ? member.name : 'Unknown'
   })
 
+  // Filter attendance for today
+  const todayObj = new Date()
+  todayObj.setHours(0, 0, 0, 0)
+  const todayAttendance = attendance.filter(a => new Date(a.scanned_at) >= todayObj)
+
+  // Chart Data preparation (Last 14 days for better view)
+  const last14Days = [...Array(14)].map((_, i) => {
+    const d = new Date()
+    d.setDate(d.getDate() - (13 - i))
+    return d.toISOString().split('T')[0]
+  })
+  
+  const chartData = last14Days.map(dateStr => {
+    const count = attendance.filter(a => a.scanned_at.startsWith(dateStr)).length
+    return { name: dateStr.substring(5), checkins: count }
+  })
+
   return (
     <div className="app-container">
       <nav className="dashboard-nav">
@@ -194,8 +226,11 @@ export default function Dashboard() {
           </div>
         ) : (
           <div>
-            <div className="dashboard-header">
+            <div className="dashboard-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h1>{gym.name} Dashboard</h1>
+              <button className="btn" onClick={handleExportCSV}>
+                <FileText size={16} /> Export Members (CSV)
+              </button>
             </div>
 
             {expiringMembers.length > 0 && (
@@ -221,7 +256,7 @@ export default function Dashboard() {
               <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                 <div style={{ padding: '12px', background: '#1a1a1a', borderRadius: '8px' }}><Activity size={24} color="#00ddff" /></div>
                 <div>
-                  <div style={{ fontSize: '24px', fontWeight: 'bold' }}>{attendance.length}</div>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold' }}>{todayAttendance.length}</div>
                   <div style={{ color: 'var(--text-muted)', fontSize: '14px' }}>Check-ins Today</div>
                 </div>
               </div>
@@ -231,6 +266,21 @@ export default function Dashboard() {
                   <div style={{ fontSize: '24px', fontWeight: 'bold' }}>{expiringMembers.length}</div>
                   <div style={{ color: 'var(--text-muted)', fontSize: '14px' }}>Expiring This Week</div>
                 </div>
+              </div>
+            </div>
+            
+            {/* TASK 9: Analytics Chart */}
+            <div className="card" style={{ marginBottom: '32px' }}>
+              <h3 style={{ fontSize: '18px', marginBottom: '24px' }}>Attendance Overview (Last 14 Days)</h3>
+              <div style={{ width: '100%', height: '250px' }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData} margin={{ top: 5, right: 0, left: -20, bottom: 5 }}>
+                    <XAxis dataKey="name" stroke="#555" fontSize={12} tickLine={false} axisLine={false} />
+                    <YAxis stroke="#555" fontSize={12} tickLine={false} axisLine={false} allowDecimals={false} />
+                    <Tooltip cursor={{ fill: '#1a1a1a' }} contentStyle={{ background: '#111', border: '1px solid #333', borderRadius: '8px' }} />
+                    <Bar dataKey="checkins" fill="var(--accent)" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             </div>
 
@@ -286,7 +336,7 @@ export default function Dashboard() {
                 <div className="card">
                   <h3 style={{ fontSize: '18px', marginBottom: '16px' }}>Today's Check-ins</h3>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    {attendance.map(a => (
+                    {todayAttendance.map(a => (
                       <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '12px', borderBottom: '1px solid var(--border)' }}>
                         <div>
                           <div style={{ fontWeight: '500' }}>{a.members?.name || 'Unknown'}</div>
@@ -303,7 +353,7 @@ export default function Dashboard() {
                         </button>
                       </div>
                     ))}
-                    {attendance.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: '14px' }}>No check-ins yet today.</p>}
+                    {todayAttendance.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: '14px' }}>No check-ins yet today.</p>}
                   </div>
                 </div>
 
