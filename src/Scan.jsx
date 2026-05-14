@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { supabase } from './supabaseClient'
 
@@ -13,7 +13,9 @@ export default function Scan() {
   
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
-  const [memberId, setMemberId] = useState(localStorage.getItem('gymtrack_member_id'))
+  
+  // Use a ref to prevent strict-mode double firing or dependency loops
+  const hasLogged = useRef(false)
 
   useEffect(() => {
     if (!token) {
@@ -37,8 +39,12 @@ export default function Scan() {
       
       setGym(data)
       
-      if (memberId) {
-        await logAttendance(memberId, data.id)
+      const savedMemberId = localStorage.getItem('gymtrack_member_id')
+      if (savedMemberId) {
+        if (!hasLogged.current) {
+          hasLogged.current = true
+          await logAttendance(savedMemberId, data.id)
+        }
       } else {
         setStatus('registering')
         setLoading(false)
@@ -46,7 +52,7 @@ export default function Scan() {
     }
     
     verifyToken()
-  }, [token, memberId])
+  }, [token]) // Removed memberId from dependencies
 
   const logAttendance = async (mId, gId) => {
     setLoading(true)
@@ -81,9 +87,12 @@ export default function Scan() {
     const newMemberId = data.id
     localStorage.setItem('gymtrack_member_id', newMemberId)
     localStorage.setItem('gymtrack_member_name', name)
-    setMemberId(newMemberId)
     
-    await logAttendance(newMemberId, gym.id)
+    // Log attendance exactly once
+    if (!hasLogged.current) {
+      hasLogged.current = true
+      await logAttendance(newMemberId, gym.id)
+    }
   }
 
   if (loading && status === 'verifying') {
