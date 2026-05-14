@@ -74,6 +74,22 @@ export default function Dashboard() {
     }
   }
 
+  const handleDeleteMember = async (id, name) => {
+    if (!window.confirm(`Are you sure you want to permanently delete ${name}? This will also delete all of their check-in history.`)) return;
+
+    // Optimistic UI updates
+    setMembers(prev => prev.filter(m => m.id !== id));
+    setAttendance(prev => prev.filter(a => a.member_id !== id));
+    setMemberships(prev => prev.filter(m => m.member_id !== id));
+
+    // Delete from DB (foreign keys ON DELETE CASCADE will handle attendance and memberships in the database automatically)
+    const { error } = await supabase.from('members').delete().eq('id', id);
+    if (error) {
+      alert("Failed to delete member: " + error.message);
+      await fetchDashboardStats(gym.id); // Revert if failed
+    }
+  }
+
   const handleSignOut = async () => {
     await supabase.auth.signOut()
     navigate('/login')
@@ -245,7 +261,16 @@ export default function Dashboard() {
                             </span>
                           </td>
                           <td style={{ padding: '16px 20px' }}>
-                            <button className="btn" style={{ padding: '6px 12px', fontSize: '12px' }} onClick={() => openEditModal(m)}>Edit</button>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <button className="btn" style={{ padding: '6px 12px', fontSize: '12px' }} onClick={() => openEditModal(m)}>Edit</button>
+                              <button 
+                                onClick={() => handleDeleteMember(m.id, m.name)}
+                                style={{ background: 'transparent', border: '1px solid rgba(255, 85, 85, 0.3)', color: '#ff5555', cursor: 'pointer', padding: '6px 10px', borderRadius: '4px', display: 'flex', alignItems: 'center' }}
+                                title="Delete member completely"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       )
