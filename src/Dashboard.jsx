@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { supabase } from './supabaseClient'
 import { useNavigate } from 'react-router-dom'
-import { LogOut, Download, Users, Activity, Calendar, AlertTriangle } from 'lucide-react'
+import { LogOut, Download, Users, Activity, Calendar, AlertTriangle, Trash2 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 
 export default function Dashboard() {
@@ -60,6 +60,18 @@ export default function Dashboard() {
       .order('scanned_at', { ascending: false })
       
     if (aData) setAttendance(aData)
+  }
+
+  const handleDeleteCheckin = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this check-in?")) return;
+    
+    setAttendance(prev => prev.filter(a => a.id !== id));
+    
+    const { error } = await supabase.from('attendance').delete().eq('id', id);
+    if (error) {
+      alert("Failed to delete: " + error.message);
+      await fetchDashboardStats(gym.id);
+    }
   }
 
   const handleSignOut = async () => {
@@ -170,7 +182,6 @@ export default function Dashboard() {
               <h1>{gym.name} Dashboard</h1>
             </div>
 
-            {/* TASK 6: Expiry Notification Banner */}
             {expiringMembers.length > 0 && (
               <div style={{ background: 'rgba(255, 170, 0, 0.1)', border: '1px solid #ffaa00', borderRadius: '8px', padding: '16px', marginBottom: '32px', display: 'flex', alignItems: 'flex-start', gap: '16px' }}>
                 <AlertTriangle color="#ffaa00" style={{ flexShrink: 0 }} />
@@ -252,10 +263,19 @@ export default function Dashboard() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     {attendance.map(a => (
                       <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '12px', borderBottom: '1px solid var(--border)' }}>
-                        <span style={{ fontWeight: '500' }}>{a.members?.name || 'Unknown'}</span>
-                        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                          {new Date(a.scanned_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
+                        <div>
+                          <div style={{ fontWeight: '500' }}>{a.members?.name || 'Unknown'}</div>
+                          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                            {new Date(a.scanned_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </div>
+                        <button 
+                          onClick={() => handleDeleteCheckin(a.id)}
+                          style={{ background: 'transparent', border: 'none', color: '#ff5555', cursor: 'pointer', padding: '6px', borderRadius: '4px', display: 'flex', alignItems: 'center' }}
+                          title="Delete check-in"
+                        >
+                          <Trash2 size={16} />
+                        </button>
                       </div>
                     ))}
                     {attendance.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: '14px' }}>No check-ins yet today.</p>}
